@@ -28,9 +28,7 @@ const routes = [
   },
   {
     path: '/:pathMatch(.*)*',
-    name: 'NotFound',
-    component: () => import('@/views/NotFound.vue'),
-    meta: { requiresAuth: false }
+    redirect: '/goods'
   },
   {
     path: '/',
