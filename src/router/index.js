@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useGoodsStore } from '@/stores/goods'
+import { useUsersStore } from '@/stores/users'
 
 const routes = [
   {
@@ -27,11 +29,11 @@ const routes = [
     meta: { requiresAuth: true, role: 'admin' }
   },
   {
-    path: '/:pathMatch(.*)*',
+    path: '/',
     redirect: '/goods'
   },
   {
-    path: '/',
+    path: '/:pathMatch(.*)*',
     redirect: '/goods'
   }
 ]
@@ -41,28 +43,35 @@ const router = createRouter({
   routes
 })
 
+let isInitialized = false
+
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
-  
-  userStore.checkLoginStatus()
-  
-  if (to.meta.requiresAuth) {
-    if (userStore.isLoggedIn) {
-      if (to.meta.role) {
-        if (userStore.user.role === to.meta.role) {
-          next()
-        } else {
-          next('/goods')
-        }
-      } else {
-        next()
-      }
-    } else {
-      next('/login')
-    }
-  } else {
-    next()
+  const goodsStore = useGoodsStore()
+  const usersStore = useUsersStore()
+
+  if (!isInitialized) {
+    goodsStore.initGoods()
+    usersStore.initUsers()
+    isInitialized = true
   }
+
+  userStore.checkLoginStatus()
+
+  if (!to.meta.requiresAuth) {
+    return next()
+  }
+
+  if (!userStore.isLoggedIn) {
+    return next({ name: 'Login', query: { redirect: to.fullPath } })
+  }
+
+  const targetRole = to.meta.role
+  if (targetRole && userStore.user.role !== targetRole) {
+    return next('/goods')
+  }
+
+  next()
 })
 
 export default router

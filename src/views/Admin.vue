@@ -70,16 +70,8 @@
               :pagination="{ pageSize: 10, showSizeChanger: true }"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'image'">
-                  <img
-                    v-if="record.images?.[0] && (record.images[0].startsWith('data:image') || record.images[0].startsWith('/'))"
-                    :src="record.images[0]"
-                    style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px"
-                  />
-                  <span v-else>{{ record.images?.[0] || '-' }}</span>
-                </template>
                 <template v-if="column.key === 'status'">
-                  <a-tag :color="record.status === 'on_sale' ? 'green' : 'orange'">
+                  <a-tag :color="record.status === 'on_sale' ? 'green' : record.status === 'sold' ? 'orange' : 'gray'">
                     {{ record.status === 'on_sale' ? '在售' : record.status === 'off_sale' ? '已下架' : '已售出' }}
                   </a-tag>
                 </template>
@@ -97,7 +89,7 @@
                   <a-button
                     v-if="record.status === 'on_sale'"
                     size="small"
-                    @click="handleSellGoods(record)"
+                    @click="handleOffSaleGoods(record)"
                   >
                     <DeleteOutlined />
                     下架
@@ -172,6 +164,7 @@
       :title="isEditingGoods ? '编辑商品' : '添加商品'"
       :footer="null"
       width="600px"
+      @cancel="closeGoodsModal"
     >
       <a-form :model="goodsForm" :rules="goodsFormRules" ref="goodsFormRef" layout="vertical">
         <a-form-item field="name" label="商品名称">
@@ -194,21 +187,6 @@
         <a-form-item field="description" label="商品描述">
           <a-textarea v-model:value="goodsForm.description" rows="4" placeholder="请输入商品描述" />
         </a-form-item>
-        <a-form-item label="商品图片（可选）">
-          <a-upload
-            :list-type="'picture-card'"
-            :file-list="imageFileList"
-            :before-upload="beforeImageUpload"
-            :custom-request="customImageUpload"
-            @change="handleImageChange"
-          >
-            <div v-if="imageFileList.length < 1">
-              <PlusOutlined />
-              <div style="margin-top: 8px">上传图片</div>
-            </div>
-          </a-upload>
-          <p style="margin-top: 8px; font-size: 12px; color: #999">未上传图片将使用默认图片</p>
-        </a-form-item>
         <a-form-item>
           <a-button type="primary" @click="handleSubmitGoods" :loading="goodsSubmitLoading">
             {{ isEditingGoods ? '保存修改' : '添加商品' }}
@@ -223,6 +201,7 @@
       :title="isEditingUser ? '编辑用户' : '添加用户'"
       :footer="null"
       width="600px"
+      @cancel="closeUserModal"
     >
       <a-form :model="userForm" :rules="userFormRules" ref="userFormRef" layout="vertical">
         <a-form-item field="username" label="用户名">
@@ -231,7 +210,7 @@
         <a-form-item field="studentId" label="学号">
           <a-input v-model:value="userForm.studentId" placeholder="请输入学号" />
         </a-form-item>
-        <a-form-item field="password" :label="isEditingUser ? '新密码（不填则保持不变）' : '密码'">
+        <a-form-item v-if="!isEditingUser" field="password" label="密码">
           <a-input-password v-model:value="userForm.password" placeholder="请输入密码" />
         </a-form-item>
         <a-form-item field="grade" label="年级">
@@ -254,61 +233,51 @@
         </a-form-item>
       </a-form>
     </a-modal>
-
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { message, Modal } from 'ant-design-vue'
 import { EditOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useUsersStore } from '@/stores/users'
 import { useGoodsStore } from '@/stores/goods'
 import { categories } from '@/data/mockData'
-import { useImageUpload } from '@/composables/useImageUpload'
 
 const router = useRouter()
 const userStore = useUserStore()
 const usersStore = useUsersStore()
 const goodsStore = useGoodsStore()
 
+// 搜索筛选
 const searchKeyword = ref('')
 const statusFilter = ref('all')
 const userSearchKeyword = ref('')
 const roleFilter = ref('all')
 
+// 弹窗控制
 const goodsModalVisible = ref(false)
 const userModalVisible = ref(false)
-
 const goodsFormRef = ref(null)
 const userFormRef = ref(null)
-
 const goodsSubmitLoading = ref(false)
 const userSubmitLoading = ref(false)
 
+// 编辑标记
 const isEditingGoods = ref(false)
 const isEditingUser = ref(false)
 const editGoodsId = ref(null)
 const editUserId = ref(null)
 
+// 表单数据
 const goodsForm = reactive({
   name: '',
   category: '',
   price: 0,
   description: ''
 })
-
-const {
-  imageFileList,
-  beforeImageUpload,
-  customImageUpload,
-  handleImageChange,
-  setImage,
-  resetImage,
-  getImages
-} = useImageUpload()
 
 const userForm = reactive({
   username: '',
@@ -319,6 +288,7 @@ const userForm = reactive({
   role: 'student'
 })
 
+// 商品表单校验
 const goodsFormRules = {
   name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }],
   category: [{ required: true, message: '请选择商品分类', trigger: 'change' }],
@@ -326,25 +296,26 @@ const goodsFormRules = {
   description: [{ required: true, message: '请输入商品描述', trigger: 'blur' }]
 }
 
-const userFormRules = {
+// 动态用户表单校验规则
+const userFormRules = computed(() => ({
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   studentId: [{ required: true, message: '请输入学号', trigger: 'blur' }],
-  password: [{ required: !isEditingUser.value, message: '请输入密码', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
   grade: [{ required: true, message: '请输入年级', trigger: 'blur' }],
   department: [{ required: true, message: '请输入院系', trigger: 'blur' }],
   role: [{ required: true, message: '请选择角色', trigger: 'change' }]
-}
+}))
 
+// 表格列配置
 const goodsColumns = [
   { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
-  { title: '图片', key: 'image', width: 60 },
   { title: '商品名称', dataIndex: 'name', key: 'name', ellipsis: true },
   { title: '分类', dataIndex: 'category', key: 'category', width: 100 },
   { title: '售价', dataIndex: 'price', key: 'price', width: 80 },
   { title: '发布人', dataIndex: 'ownerName', key: 'ownerName', width: 100 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 80 },
   { title: '发布时间', dataIndex: 'publishTime', key: 'publishTime', width: 120 },
-  { title: '操作', key: 'action', width: 150 }
+  { title: '操作', key: 'action', width: 180 }
 ]
 
 const userColumns = [
@@ -354,23 +325,37 @@ const userColumns = [
   { title: '年级', dataIndex: 'grade', key: 'grade' },
   { title: '院系', dataIndex: 'department', key: 'department' },
   { title: '角色', dataIndex: 'role', key: 'role', width: 80 },
-  { title: '操作', key: 'action', width: 200 }
+  { title: '操作', key: 'action', width: 160 }
 ]
 
-const totalGoods = computed(() => goodsStore.goods.length)
-const onSaleGoods = computed(() => goodsStore.goods.filter(g => g.status === 'on_sale').length)
-const soldGoods = computed(() => goodsStore.goods.filter(g => g.status === 'sold').length)
-const userCount = computed(() => usersStore.users.length)
+// 统计数字（优化计算，只遍历一次）
+const statsData = computed(() => {
+  const all = goodsStore.goods
+  let onSale = 0, sold = 0
+  all.forEach(item => {
+    if (item.status === 'on_sale') onSale++
+    if (item.status === 'sold') sold++
+  })
+  return {
+    total: all.length,
+    onSale,
+    sold,
+    userTotal: usersStore.users.length
+  }
+})
+const totalGoods = computed(() => statsData.value.total)
+const onSaleGoods = computed(() => statsData.value.onSale)
+const soldGoods = computed(() => statsData.value.sold)
+const userCount = computed(() => statsData.value.userTotal)
 
+// 筛选商品列表
 const filteredGoods = computed(() => {
   let list = goodsStore.goods
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase().trim()
-    list = list.filter(g => {
-      const nameLower = g.name.toLowerCase()
-      const descLower = g.description.toLowerCase()
-      return nameLower.includes(keyword) || descLower.includes(keyword)
-    })
+    list = list.filter(g =>
+      g.name.toLowerCase().includes(keyword) || g.description.toLowerCase().includes(keyword)
+    )
   }
   if (statusFilter.value !== 'all') {
     list = list.filter(g => g.status === statusFilter.value)
@@ -378,12 +363,12 @@ const filteredGoods = computed(() => {
   return list
 })
 
+// 筛选用户列表
 const filteredUsers = computed(() => {
   let list = usersStore.users
   if (userSearchKeyword.value) {
-    list = list.filter(u => 
-      u.username.includes(userSearchKeyword.value) || 
-      u.studentId.includes(userSearchKeyword.value)
+    list = list.filter(u =>
+      u.username.includes(userSearchKeyword.value) || u.studentId.includes(userSearchKeyword.value)
     )
   }
   if (roleFilter.value !== 'all') {
@@ -392,11 +377,14 @@ const filteredUsers = computed(() => {
   return list
 })
 
+// 获取分类文本
 const getCategoryLabel = (category) => {
+  if (!category) return '未分类'
   const cat = categories.find(c => c.value === category)
   return cat ? cat.label : category
 }
 
+// ========== 商品弹窗逻辑 ==========
 const showGoodsModal = () => {
   isEditingGoods.value = false
   editGoodsId.value = null
@@ -407,16 +395,13 @@ const showGoodsModal = () => {
 const handleEditGoods = (record) => {
   isEditingGoods.value = true
   editGoodsId.value = record.id
-  goodsForm.name = record.name
-  goodsForm.category = record.category
-  goodsForm.price = record.price
-  goodsForm.description = record.description
-  setImage(record.images?.[0])
+  Object.assign(goodsForm, record)
   goodsModalVisible.value = true
 }
 
 const closeGoodsModal = () => {
   goodsModalVisible.value = false
+  goodsSubmitLoading.value = false
   resetGoodsForm()
 }
 
@@ -425,50 +410,67 @@ const resetGoodsForm = () => {
   goodsForm.category = ''
   goodsForm.price = 0
   goodsForm.description = ''
-  resetImage()
 }
 
+// 提交商品
 const handleSubmitGoods = async () => {
   try {
     await goodsFormRef.value.validate()
     goodsSubmitLoading.value = true
-
     setTimeout(() => {
-      const images = getImages()
-      
       if (isEditingGoods.value) {
-        goodsStore.updateGoods(editGoodsId.value, { ...goodsForm, images })
-        message.success('商品修改成功')
+        const ok = goodsStore.updateGoods(editGoodsId.value, { ...goodsForm })
+        ok ? message.success('商品修改成功') : message.error('修改失败，商品不存在')
       } else {
         const newGoods = {
-          id: Date.now(),
+          id: Date.now() + Math.floor(Math.random() * 10000),
           ...goodsForm,
           ownerId: 0,
-          ownerName: '管理员',
-          ownerGrade: '-',
-          images,
+          ownerName: '管理员后台',
+          ownerGrade: '管理员',
           status: 'on_sale',
           publishTime: new Date().toISOString().split('T')[0]
         }
-        goodsStore.addGoods(newGoods)
-        message.success('商品添加成功')
+        try {
+          goodsStore.addGoods(newGoods)
+          message.success('商品添加成功')
+        } catch (e) {
+          message.error(e.message)
+        }
       }
       closeGoodsModal()
-      goodsSubmitLoading.value = false
-    }, 500)
-  } catch (error) {
-    console.error('表单校验失败:', error)
+    }, 400)
+  } catch (err) {
+    console.log('表单校验失败', err)
   }
 }
 
-const handleSellGoods = (record) => {
-  goodsStore.updateGoods(record.id, { status: 'off_sale' })
+// 下架商品（改名修正语义）
+const handleOffSaleGoods = (record) => {
+  Modal.confirm({
+    title: '确认下架',
+    content: `确定要下架商品【${record.name}】吗？`,
+    onOk: () => {
+      goodsStore.updateGoods(record.id, { status: 'off_sale' })
+      message.success('商品已下架')
+    }
+  })
 }
 
+// 删除商品
 const handleDeleteGoods = (record) => {
-  goodsStore.deleteGoods(record.id)
+  Modal.confirm({
+    title: '危险操作',
+    content: `确定永久删除商品【${record.name}】？删除后不可恢复`,
+    okType: 'danger',
+    onOk: () => {
+      const ok = goodsStore.deleteGoods(record.id)
+      ok ? message.success('删除成功') : message.error('删除失败')
+    }
+  })
 }
 
+// ========== 用户弹窗逻辑 ==========
 const showUserModal = () => {
   isEditingUser.value = false
   editUserId.value = null
@@ -479,17 +481,13 @@ const showUserModal = () => {
 const handleEditUser = (record) => {
   isEditingUser.value = true
   editUserId.value = record.id
-  userForm.username = record.username
-  userForm.studentId = record.studentId
-  userForm.password = ''
-  userForm.grade = record.grade
-  userForm.department = record.department
-  userForm.role = record.role
+  Object.assign(userForm, record)
   userModalVisible.value = true
 }
 
 const closeUserModal = () => {
   userModalVisible.value = false
+  userSubmitLoading.value = false
   resetUserForm()
 }
 
@@ -502,48 +500,68 @@ const resetUserForm = () => {
   userForm.role = 'student'
 }
 
+// 提交用户
 const handleSubmitUser = async () => {
   try {
     await userFormRef.value.validate()
     userSubmitLoading.value = true
-
     setTimeout(() => {
       if (isEditingUser.value) {
-        const updateData = { ...userForm }
-        if (!updateData.password) {
-          delete updateData.password
-        }
-        usersStore.updateUser(editUserId.value, updateData)
-        message.success('用户信息修改成功')
+        const { password, ...updateData } = userForm
+        const ok = usersStore.updateUser(editUserId.value, updateData)
+        ok ? message.success('用户信息修改成功') : message.error('修改失败')
       } else {
         const newUser = {
           id: Date.now(),
-          ...userForm,
-          password: userForm.password || '123456'
+          ...userForm
         }
-        usersStore.addUser(newUser)
-        message.success('用户添加成功')
+        const addOk = usersStore.addUser(newUser)
+        addOk ? message.success('用户添加成功') : message.error('学号/ID已存在')
       }
       closeUserModal()
-      userSubmitLoading.value = false
-    }, 500)
-  } catch (error) {
-    console.error('表单校验失败:', error)
+    }, 400)
+  } catch (err) {
+    console.log('用户表单校验失败', err)
   }
 }
 
+// 删除用户
 const handleDeleteUser = (record) => {
-  usersStore.deleteUser(record.id)
+  Modal.confirm({
+    title: '删除用户',
+    content: `确定删除用户【${record.username} - ${record.studentId}】？`,
+    okType: 'danger',
+    onOk: () => {
+      const ok = usersStore.deleteUser(record.id)
+      ok ? message.success('用户已删除') : message.error('删除失败')
+    }
+  })
 }
 
+// 切换标签
+const handleTabChange = () => {}
+
+// 退出登录
 const handleLogout = () => {
-  userStore.logout()
-  message.success('已退出登录')
-  router.push('/login')
+  Modal.confirm({
+    title: '退出登录',
+    content: '确认退出管理员后台？',
+    onOk: () => {
+      userStore.logout()
+      goodsStore.resetStore()
+      usersStore.resetStore()
+      message.success('已退出登录')
+      router.push('/login')
+    }
+  })
 }
 
+// 页面挂载校验角色（兜底防护）
 onMounted(() => {
-  goodsStore.initGoods()
+  if (!userStore.isLoggedIn || userStore.user?.role !== 'admin') {
+    message.warning('无管理员权限')
+    router.push('/goods')
+  }
 })
 </script>
 
@@ -628,5 +646,6 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 </style>

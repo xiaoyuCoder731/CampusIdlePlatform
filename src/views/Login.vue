@@ -21,7 +21,14 @@
           </a-input-password>
         </a-form-item>
         <a-form-item>
-          <a-button type="primary" size="large" block @click="handleLogin" :loading="loading">
+          <a-button 
+            type="primary" 
+            size="large" 
+            block 
+            @click="handleLogin" 
+            :loading="loading"
+            :disabled="loading"
+          >
             登录
           </a-button>
         </a-form-item>
@@ -34,13 +41,15 @@
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { UserOutlined, LockOutlined } from '@ant-design/icons-vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useUsersStore } from '@/stores/users'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const usersStore = useUsersStore()
+
 const formRef = ref(null)
 const loading = ref(false)
 
@@ -49,52 +58,76 @@ const form = reactive({
   password: ''
 })
 
+// 表单校验规则
 const rules = {
   studentId: [
     { required: true, message: '请输入学号', trigger: 'blur' },
-    { min: 1, max: 20, message: '学号长度在1-20之间', trigger: 'blur' }
+    { min: 1, max: 20, message: '学号长度限制1-20位', trigger: 'blur' }
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 20, message: '密码长度在6-20之间', trigger: 'blur' }
+    { min: 6, max: 20, message: '密码长度6-20位', trigger: 'blur' }
   ]
 }
 
 const handleLogin = async () => {
+  if (loading.value) return
   try {
     await formRef.value.validate()
     loading.value = true
     
+    usersStore.initUsers()
+    
     setTimeout(() => {
-      const user = usersStore.getUserByStudentId(form.studentId)
-      
-      if (user && user.password === form.password) {
-        userStore.login({
-          id: user.id,
-          studentId: user.studentId,
-          username: user.username,
-          grade: user.grade,
-          department: user.department,
-          role: user.role
-        })
-        message.success('登录成功')
-        if (user.role === 'admin') {
-          router.push('/admin')
-        } else {
-          router.push('/goods')
-        }
+      const targetUser = usersStore.getUserByStudentId(form.studentId)
+      // 账号不存在
+      if (!targetUser) {
+        message.error('该学号未注册，请核对学号')
+        loading.value = false
+        return
+      }
+      // 密码不匹配
+      if (targetUser.password !== form.password) {
+        message.error('密码输入错误')
+        loading.value = false
+        return
+      }
+
+      // 登录保存用户信息
+      userStore.login({
+        id: targetUser.id,
+        studentId: targetUser.studentId,
+        username: targetUser.username,
+        grade: targetUser.grade,
+        department: targetUser.department,
+        role: targetUser.role
+      })
+      message.success('登录成功')
+
+      // 回跳逻辑：优先跳转登录前页面，无则按角色跳转首页
+      const redirectPath = route.query.redirect
+      if (redirectPath) {
+        router.push(redirectPath)
       } else {
-        message.error('学号或密码错误')
+        router.push(targetUser.role === 'admin' ? '/admin' : '/goods')
       }
       loading.value = false
-    }, 500)
+    }, 400)
   } catch (error) {
     console.error('表单校验失败:', error)
+    loading.value = false
   }
 }
 
 onMounted(() => {
   usersStore.initUsers()
+  
+  const isValid = userStore.checkLoginStatus()
+  if (isValid) {
+    const targetPath = userStore.user.role === 'admin' ? '/admin' : '/goods'
+    router.push(targetPath)
+    message.info('你已登录，无需重复操作')
+  }
 })
 </script>
 
@@ -125,22 +158,12 @@ onMounted(() => {
 .login-header h1 {
   font-size: 24px;
   color: #333;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
 }
 
 .login-header p {
   font-size: 14px;
   color: #999;
-}
-
-.login-tips {
-  margin-top: 20px;
-  text-align: center;
-}
-
-.login-tips p {
-  font-size: 12px;
-  color: #999;
-  margin: 4px 0;
+  margin: 0;
 }
 </style>

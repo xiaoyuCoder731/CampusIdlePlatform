@@ -33,10 +33,13 @@
         :data-source="myGoodsList"
         row-key="id"
         :pagination="{ pageSize: 5, showSizeChanger: true, showQuickJumper: true }"
+        v-if="myGoodsList.length"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'status'">
-            <a-tag :color="record.status === 'on_sale' ? 'green' : 'orange'">
+            <a-tag
+              :color="record.status === 'on_sale' ? 'green' : record.status === 'sold' ? 'red' : 'gold'"
+            >
               {{ record.status === 'on_sale' ? '在售' : record.status === 'off_sale' ? '已下架' : '已售出' }}
             </a-tag>
           </template>
@@ -51,8 +54,7 @@
             <a-button
               v-if="record.status === 'on_sale'"
               size="small"
-              danger
-              @click="handleSell(record)"
+              @click="handleOffSale(record)"
             >
               <TagOutlined />
               下架
@@ -69,7 +71,7 @@
         </template>
       </a-table>
 
-      <div v-if="myGoodsList.length === 0" class="empty-state">
+      <div v-else class="empty-state">
         <UploadOutlined />
         <p>你还没有发布任何闲置物品</p>
         <a-button type="primary" @click="showAddModal">立即发布</a-button>
@@ -81,6 +83,7 @@
       :title="isEditing ? '编辑闲置物品' : '发布闲置物品'"
       :footer="null"
       width="600px"
+      @cancel="closeModal"
     >
       <a-form :model="form" :rules="formRules" ref="formRef" layout="vertical">
         <a-form-item field="name" label="物品名称">
@@ -107,22 +110,6 @@
           <a-textarea v-model:value="form.description" rows="4" placeholder="请描述物品的成色、使用情况等" />
         </a-form-item>
 
-        <a-form-item label="物品图片（可选）">
-          <a-upload
-            :list-type="'picture-card'"
-            :file-list="imageFileList"
-            :before-upload="beforeImageUpload"
-            :custom-request="customImageUpload"
-            @change="handleImageChange"
-          >
-            <div v-if="imageFileList.length < 1">
-              <PlusOutlined />
-              <div style="margin-top: 8px">上传图片</div>
-            </div>
-          </a-upload>
-          <p style="margin-top: 8px; font-size: 12px; color: #999">未上传图片将使用默认图片</p>
-        </a-form-item>
-
         <a-form-item>
           <a-button type="primary" @click="handleSubmit" :loading="submitLoading">
             {{ isEditing ? '保存修改' : '发布商品' }}
@@ -136,7 +123,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import {
   ArrowLeftOutlined,
   PlusOutlined,
@@ -149,12 +136,12 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useGoodsStore } from '@/stores/goods'
 import { categories } from '@/data/mockData'
-import { useImageUpload } from '@/composables/useImageUpload'
 
 const router = useRouter()
 const userStore = useUserStore()
 const goodsStore = useGoodsStore()
 
+// 弹窗与状态控制
 const addModalVisible = ref(false)
 const formRef = ref(null)
 const submitLoading = ref(false)
@@ -162,16 +149,7 @@ const isEditing = ref(false)
 const editId = ref(null)
 const statusFilter = ref('all')
 
-const {
-  imageFileList,
-  beforeImageUpload,
-  customImageUpload,
-  handleImageChange,
-  setImage,
-  resetImage,
-  getImages
-} = useImageUpload()
-
+// 发布/编辑表单
 const form = reactive({
   name: '',
   category: '',
@@ -179,6 +157,7 @@ const form = reactive({
   description: ''
 })
 
+// 表单校验规则
 const formRules = {
   name: [{ required: true, message: '请输入物品名称', trigger: 'blur' }],
   category: [{ required: true, message: '请选择物品分类', trigger: 'change' }],
@@ -186,6 +165,7 @@ const formRules = {
   description: [{ required: true, message: '请输入物品描述', trigger: 'blur' }]
 }
 
+// 表格列配置
 const columns = [
   {
     title: '物品名称',
@@ -221,23 +201,28 @@ const columns = [
   {
     title: '操作',
     key: 'action',
-    width: 200
+    width: 220
   }
 ]
 
+// 筛选当前登录学生自己的商品
 const myGoodsList = computed(() => {
-  let list = goodsStore.goods.filter(g => g.ownerId === userStore.user?.id)
+  if (!userStore.user?.id) return []
+  let list = goodsStore.goods.filter(g => g.ownerId === userStore.user.id)
   if (statusFilter.value !== 'all') {
     list = list.filter(g => g.status === statusFilter.value)
   }
   return list
 })
 
+// 获取分类文本，空值兜底
 const getCategoryLabel = (category) => {
+  if (!category) return '未分类'
   const cat = categories.find(c => c.value === category)
   return cat ? cat.label : category
 }
 
+// 打开新增弹窗
 const showAddModal = () => {
   isEditing.value = false
   editId.value = null
@@ -245,88 +230,119 @@ const showAddModal = () => {
   addModalVisible.value = true
 }
 
+// 打开编辑弹窗
 const showEditModal = (record) => {
   isEditing.value = true
   editId.value = record.id
-  form.name = record.name
-  form.category = record.category
-  form.price = record.price
-  form.description = record.description
-  setImage(record.images?.[0])
+  Object.assign(form, record)
   addModalVisible.value = true
 }
 
+// 关闭弹窗，重置表单与loading
 const closeModal = () => {
   addModalVisible.value = false
+  submitLoading.value = false
   resetForm()
 }
 
+// 清空表单
 const resetForm = () => {
   form.name = ''
   form.category = ''
   form.price = 0
   form.description = ''
-  resetImage()
 }
 
+// 提交发布/编辑
 const handleSubmit = async () => {
   try {
     await formRef.value.validate()
     submitLoading.value = true
 
     setTimeout(() => {
-      const images = getImages()
-
       if (isEditing.value) {
-        goodsStore.updateGoods(editId.value, { ...form, images })
-        message.success('修改成功')
+        const success = goodsStore.updateGoods(editId.value, { ...form })
+        success ? message.success('商品修改成功') : message.error('修改失败，商品不存在')
       } else {
         const newGoods = {
-          id: Date.now(),
+          id: Date.now() + Math.floor(Math.random() * 10000),
           ...form,
           ownerId: userStore.user.id,
           ownerName: userStore.user.username,
           ownerGrade: userStore.user.grade,
-          images,
           status: 'on_sale',
           publishTime: new Date().toISOString().split('T')[0]
         }
-        goodsStore.addGoods(newGoods)
-        message.success('发布成功')
+        try {
+          goodsStore.addGoods(newGoods)
+          message.success('闲置发布成功')
+        } catch (e) {
+          message.error(e.message)
+        }
       }
-
       closeModal()
       submitLoading.value = false
-    }, 500)
-  } catch (error) {
-    console.error('表单校验失败:', error)
+    }, 400)
+  } catch (err) {
+    console.log('表单校验失败', err)
   }
 }
 
-const handleSell = (record) => {
-  goodsStore.updateGoods(record.id, { status: 'off_sale' })
+// 下架商品（重命名修正语义）
+const handleOffSale = (record) => {
+  Modal.confirm({
+    title: '确认下架',
+    content: `确定要下架【${record.name}】吗？下架后其他用户无法购买`,
+    onOk: () => {
+      goodsStore.updateGoods(record.id, { status: 'off_sale' })
+      message.success('商品已下架')
+    }
+  })
 }
 
+// 删除商品，危险操作二次确认
 const handleDelete = (record) => {
-  goodsStore.deleteGoods(record.id)
+  Modal.confirm({
+    title: '永久删除商品',
+    content: `删除【${record.name}】后数据无法恢复，确认删除？`,
+    okType: 'danger',
+    onOk: () => {
+      const delSuccess = goodsStore.deleteGoods(record.id)
+      delSuccess ? message.success('删除成功') : message.error('删除失败')
+    }
+  })
 }
 
+// 返回首页
 const goBack = () => {
   router.push('/goods')
 }
 
+// 退出登录带确认弹窗
 const handleLogout = () => {
-  userStore.logout()
-  message.success('已退出登录')
-  router.push('/login')
+  Modal.confirm({
+    title: '退出登录',
+    content: '确认退出当前学生账号？',
+    onOk: () => {
+      userStore.logout()
+      message.success('已退出登录')
+      router.push('/login')
+    }
+  })
 }
 
+// 页面挂载：双重校验登录+角色，禁止管理员进入
 onMounted(() => {
-  if (!userStore.checkLoginStatus()) {
+  const loginValid = userStore.checkLoginStatus()
+  if (!loginValid) {
+    message.warning('请先登录账号')
     router.push('/login')
     return
   }
-  goodsStore.initGoods()
+  if (userStore.user.role !== 'student') {
+    message.warning('管理员无权限访问闲置发布页面')
+    router.push('/admin')
+  }
 })
 </script>
 
@@ -343,6 +359,8 @@ onMounted(() => {
   padding: 20px 40px;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .header-left {
@@ -360,6 +378,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .welcome-text {
@@ -376,6 +395,8 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .empty-state {

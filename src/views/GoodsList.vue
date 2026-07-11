@@ -21,10 +21,15 @@
     <div class="content-wrapper">
       <aside class="filter-sidebar">
         <h3>筛选条件</h3>
-        
         <a-form :model="filters" layout="vertical">
           <a-form-item label="物品分类">
-            <a-select v-model:value="filters.category" placeholder="请选择分类" allow-clear>
+            <a-select
+              v-model:value="filters.category"
+              placeholder="请选择分类"
+              allow-clear
+              @change="handleFilterChange"
+            >
+              <a-select-option value="all">全部分类</a-select-option>
               <a-select-option v-for="cat in categories" :key="cat.value" :value="cat.value">
                 {{ cat.label }}
               </a-select-option>
@@ -32,7 +37,13 @@
           </a-form-item>
 
           <a-form-item label="发布年级">
-            <a-select v-model:value="filters.grade" placeholder="请选择年级" allow-clear>
+            <a-select
+              v-model:value="filters.grade"
+              placeholder="请选择年级"
+              allow-clear
+              @change="handleFilterChange"
+            >
+              <a-select-option value="all">全部年级</a-select-option>
               <a-select-option v-for="g in grades" :key="g.value" :value="g.value">
                 {{ g.label }}
               </a-select-option>
@@ -47,6 +58,7 @@
                 :min="0"
                 :max="99999"
                 style="width: 100px"
+                @change="handleFilterChange"
               />
               <span class="price-separator">-</span>
               <a-input-number
@@ -55,12 +67,13 @@
                 :min="0"
                 :max="99999"
                 style="width: 100px"
+                @change="handleFilterChange"
               />
             </div>
           </a-form-item>
 
           <a-form-item>
-            <a-button type="primary" block @click="resetFilters">重置筛选</a-button>
+            <a-button danger block @click="resetFilters">重置筛选</a-button>
           </a-form-item>
         </a-form>
       </aside>
@@ -72,6 +85,7 @@
             placeholder="搜索商品名称、描述、分类或发布人..."
             allow-clear
             size="large"
+            @input="handleFilterChange"
           >
             <template #prefix>
               <SearchOutlined />
@@ -86,16 +100,9 @@
             class="goods-card"
             @click="showDetail(goods)"
           >
-            <div class="goods-image">
-              <img
-                v-if="goods.images[0] && (goods.images[0].startsWith('data:image') || goods.images[0].startsWith('/'))"
-                :src="goods.images[0]"
-                alt="商品图片"
-                class="goods-img"
-              />
-              <span v-else class="emoji-icon">{{ goods.images[0] }}</span>
-              <span v-if="goods.status !== 'on_sale'" class="sold-badge">{{ goods.status === 'off_sale' ? '已下架' : '已售出' }}</span>
-            </div>
+            <span v-if="goods.status !== 'on_sale'" class="sold-badge">
+              {{ goods.status === 'off_sale' ? '已下架' : '已售出' }}
+            </span>
             <div class="goods-info">
               <h4 class="goods-name">{{ goods.name }}</h4>
               <p class="goods-desc">{{ goods.description }}</p>
@@ -112,34 +119,29 @@
 
         <div v-if="filteredGoods.length === 0" class="empty-state">
           <ShoppingCartOutlined />
-          <p>暂无符合条件的商品</p>
+          <p>暂无符合条件的商品，请更换筛选条件</p>
         </div>
       </main>
     </div>
 
+    <!-- 商品详情弹窗 -->
     <a-modal
       v-model:open="detailModalVisible"
-      :title="selectedGoods?.name"
+      :title="selectedGoods?.name || '商品详情'"
       :footer="null"
       width="600px"
+      @cancel="closeDetailModal"
     >
       <div v-if="selectedGoods" class="detail-content">
-        <div class="detail-image">
-          <img
-            v-if="selectedGoods.images[0] && (selectedGoods.images[0].startsWith('data:image') || selectedGoods.images[0].startsWith('/'))"
-            :src="selectedGoods.images[0]"
-            alt="商品图片"
-            class="detail-img"
-          />
-          <span v-else class="emoji-icon-large">{{ selectedGoods.images[0] }}</span>
-        </div>
         <div class="detail-info">
           <div class="detail-price">
             <span class="current-price">¥{{ selectedGoods.price }}</span>
           </div>
           <div class="detail-meta">
             <a-tag color="blue">{{ getCategoryLabel(selectedGoods.category) }}</a-tag>
-            <a-tag :color="selectedGoods.status === 'on_sale' ? 'green' : 'orange'">{{ selectedGoods.status === 'on_sale' ? '在售' : selectedGoods.status === 'off_sale' ? '已下架' : '已售出' }}</a-tag>
+            <a-tag :color="selectedGoods.status === 'on_sale' ? 'green' : 'orange'">
+              {{ selectedGoods.status === 'on_sale' ? '在售' : selectedGoods.status === 'off_sale' ? '已下架' : '已售出' }}
+            </a-tag>
           </div>
           <div class="detail-description">
             <h4>商品描述</h4>
@@ -156,34 +158,39 @@
               v-if="selectedGoods.status === 'on_sale'"
               type="primary"
               size="large"
+              block
               @click="handlePurchase"
             >
               立即购买
             </a-button>
-            <a-tag v-else :color="selectedGoods.status === 'off_sale' ? 'orange' : 'red'">{{ selectedGoods.status === 'off_sale' ? '已下架' : '已售出' }}</a-tag>
+            <a-tag v-else size="large" color="orange">
+              {{ selectedGoods.status === 'off_sale' ? '已下架，无法购买' : '已售出' }}
+            </a-tag>
           </div>
         </div>
       </div>
     </a-modal>
 
+    <!-- 下单弹窗 -->
     <a-modal
       v-model:open="purchaseModalVisible"
       title="购买商品"
       :footer="null"
       width="500px"
+      @cancel="closePurchaseModal"
     >
       <a-form :model="purchaseForm" :rules="purchaseFormRules" ref="purchaseFormRef" layout="vertical">
         <a-form-item field="buyerName" label="收货人姓名">
           <a-input v-model:value="purchaseForm.buyerName" placeholder="请输入收货人姓名" />
         </a-form-item>
         <a-form-item field="buyerPhone" label="联系电话">
-          <a-input v-model:value="purchaseForm.buyerPhone" placeholder="请输入联系电话" />
+          <a-input v-model:value="purchaseForm.buyerPhone" placeholder="请输入11位手机号" />
         </a-form-item>
         <a-form-item field="address" label="收货地址">
-          <a-textarea v-model:value="purchaseForm.address" placeholder="请输入收货地址" :rows="3" />
+          <a-textarea v-model:value="purchaseForm.address" placeholder="填写校园宿舍/自取地点" :rows="3" />
         </a-form-item>
         <a-form-item field="remark" label="备注">
-          <a-textarea v-model:value="purchaseForm.remark" placeholder="请输入备注信息" :rows="3" />
+          <a-textarea v-model:value="purchaseForm.remark" placeholder="交易约定备注（选填）" :rows="2" />
         </a-form-item>
         <a-form-item>
           <a-button type="primary" size="large" block @click="submitPurchase" :loading="purchaseLoading">
@@ -197,7 +204,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { SearchOutlined, ShoppingCartOutlined } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -208,20 +215,23 @@ const router = useRouter()
 const userStore = useUserStore()
 const goodsStore = useGoodsStore()
 
+// 筛选条件
 const filters = reactive({
   keyword: '',
   category: 'all',
   grade: 'all'
 })
+const priceMin = ref(null)
+const priceMax = ref(null)
 
-const priceMin = ref(0)
-const priceMax = ref(10000)
+// 弹窗控制
 const detailModalVisible = ref(false)
 const selectedGoods = ref(null)
 const purchaseModalVisible = ref(false)
 const purchaseFormRef = ref(null)
 const purchaseLoading = ref(false)
 
+// 下单表单
 const purchaseForm = reactive({
   buyerName: '',
   buyerPhone: '',
@@ -229,122 +239,147 @@ const purchaseForm = reactive({
   remark: ''
 })
 
+// 表单校验
 const purchaseFormRules = {
-  buyerName: [
-    { required: true, message: '请输入收货人姓名', trigger: 'blur' }
-  ],
+  buyerName: [{ required: true, message: '请输入收货人姓名', trigger: 'blur' }],
   buyerPhone: [
     { required: true, message: '请输入联系电话', trigger: 'blur' },
-    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的手机号码', trigger: 'blur' }
+    { pattern: /^1[3-9]\d{9}$/, message: '手机号格式错误', trigger: 'blur' }
   ],
-  address: [
-    { required: true, message: '请输入收货地址', trigger: 'blur' }
-  ]
+  address: [{ required: true, message: '请输入收货地址', trigger: 'blur' }]
 }
 
+// 统一筛选逻辑（单层遍历，性能优化）
 const filteredGoods = computed(() => {
-  return goodsStore.goods.filter(goods => {
-    const keyword = filters.keyword.toLowerCase().trim()
-    if (!keyword) {
-      return true
-    }
-    const nameLower = goods.name.toLowerCase()
-    const descLower = goods.description.toLowerCase()
-    return nameLower.includes(keyword) || descLower.includes(keyword)
-  }).filter(goods => {
-    const matchCategory = filters.category === 'all' || goods.category === filters.category
-    const matchGrade = filters.grade === 'all' || goods.ownerGrade === filters.grade
-    const matchPriceMin = !priceMin.value || goods.price >= priceMin.value
-    const matchPriceMax = !priceMax.value || goods.price <= priceMax.value
-    return matchCategory && matchGrade && matchPriceMin && matchPriceMax
+  const keyword = filters.keyword.toLowerCase().trim()
+  const min = priceMin.value ?? 0
+  const max = priceMax.value ?? 99999
+
+  return goodsStore.goods.filter(item => {
+    // 关键词匹配
+    const matchKey = !keyword
+      || item.name.toLowerCase().includes(keyword)
+      || item.description.toLowerCase().includes(keyword)
+    if (!matchKey) return false
+
+    // 分类、年级
+    const matchCat = filters.category === 'all' || item.category === filters.category
+    const matchGrade = filters.grade === 'all' || item.ownerGrade === filters.grade
+    if (!matchCat || !matchGrade) return false
+
+    // 价格区间校验：最小值不能大于最大值
+    if (min > max) return false
+    const matchPrice = item.price >= min && item.price <= max
+
+    return matchPrice
   })
 })
 
+// 获取分类文本，空值兜底
 const getCategoryLabel = (category) => {
+  if (!category) return '未分类'
   const cat = categories.find(c => c.value === category)
   return cat ? cat.label : category
 }
 
+// 筛选变更防抖提示
+const handleFilterChange = () => {}
+
+// 重置所有筛选
 const resetFilters = () => {
   filters.keyword = ''
   filters.category = 'all'
   filters.grade = 'all'
-  priceMin.value = 0
-  priceMax.value = 10000
-  message.success('筛选条件已重置')
+  priceMin.value = null
+  priceMax.value = null
+  message.info('筛选条件已清空')
 }
 
-const handlePurchase = () => {
-  if (!userStore.isLoggedIn) {
-    message.warning('请先登录')
-    router.push('/login')
-    return
-  }
-  if (userStore.user.role !== 'student') {
-    message.warning('只有学生可以购买商品')
-    return
-  }
-  purchaseModalVisible.value = true
-}
-
-const submitPurchase = async () => {
-  try {
-    await purchaseFormRef.value.validate()
-    purchaseLoading.value = true
-    
-    setTimeout(() => {
-      const result = goodsStore.purchaseGoods(selectedGoods.value.id, {
-        buyerId: userStore.user.id,
-        buyerStudentId: userStore.user.studentId,
-        ...purchaseForm
-      })
-      
-      if (result) {
-        message.success('购买成功！请联系卖家完成交易')
-        selectedGoods.value.status = 'sold'
-        purchaseModalVisible.value = false
-        detailModalVisible.value = false
-        
-        purchaseForm.buyerName = ''
-        purchaseForm.buyerPhone = ''
-        purchaseForm.address = ''
-        purchaseForm.remark = ''
-      } else {
-        message.error('购买失败，请重试')
-      }
-      purchaseLoading.value = false
-    }, 500)
-  } catch (error) {
-    console.error('表单校验失败:', error)
-  }
-}
-
+// 打开商品详情
 const showDetail = (goods) => {
   selectedGoods.value = goods
   detailModalVisible.value = true
 }
 
-const goToLogin = () => {
-  router.push('/login')
+// 关闭详情弹窗并清空数据
+const closeDetailModal = () => {
+  detailModalVisible.value = false
+  selectedGoods.value = null
 }
 
-const goToMyGoods = () => {
-  router.push('/my-goods')
+// 关闭下单弹窗，重置表单
+const closePurchaseModal = () => {
+  purchaseModalVisible.value = false
+  purchaseLoading.value = false
+  purchaseForm.buyerName = ''
+  purchaseForm.buyerPhone = ''
+  purchaseForm.address = ''
+  purchaseForm.remark = ''
 }
 
-const goToAdmin = () => {
-  router.push('/admin')
+// 立即购买按钮校验权限
+const handlePurchase = () => {
+  // 未登录拦截
+  if (!userStore.isLoggedIn) {
+    message.warning('请先登录账号再购买商品')
+    router.push({ path: '/login', query: { redirect: '/goods' } })
+    return
+  }
+  // 管理员禁止购买
+  if (userStore.user.role === 'admin') {
+    message.warning('管理员账号仅可管理商品，无法下单购买')
+    return
+  }
+  purchaseModalVisible.value = true
 }
 
+// 提交购买订单
+const submitPurchase = async () => {
+  try {
+    await purchaseFormRef.value.validate()
+    purchaseLoading.value = true
+
+    setTimeout(() => {
+      const orderInfo = {
+        buyerId: userStore.user.id,
+        buyerStudentId: userStore.user.studentId,
+        ...purchaseForm
+      }
+      const orderResult = goodsStore.purchaseGoods(selectedGoods.value.id, orderInfo)
+
+      if (orderResult) {
+        message.success('下单成功！请主动联系卖家完成线下交易')
+        closePurchaseModal()
+        closeDetailModal()
+      } else {
+        message.error('下单失败，商品已售出或不存在')
+      }
+      purchaseLoading.value = false
+    }, 400)
+  } catch (err) {
+    console.log('下单表单校验失败', err)
+  }
+}
+
+// 页面跳转
+const goToLogin = () => router.push('/login')
+const goToMyGoods = () => router.push('/my-goods')
+const goToAdmin = () => router.push('/admin')
+
+// 退出登录带确认弹窗
 const handleLogout = () => {
-  userStore.logout()
-  message.success('已退出登录')
-  router.push('/goods')
+  Modal.confirm({
+    title: '退出登录',
+    content: '确定要退出当前账号吗？',
+    onOk: () => {
+      userStore.logout()
+      message.success('已退出登录')
+      router.push('/goods')
+    }
+  })
 }
 
-onMounted(() => {
-  goodsStore.initGoods()
-})
+onMounted(() => {})
 </script>
 
 <style scoped>
@@ -370,12 +405,14 @@ onMounted(() => {
 .header-left p {
   font-size: 14px;
   opacity: 0.9;
+  margin: 0;
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .welcome-text {
@@ -398,7 +435,7 @@ onMounted(() => {
 
 .filter-sidebar h3 {
   font-size: 16px;
-  margin-bottom: 20px;
+  margin: 0 0 20px;
   padding-bottom: 10px;
   border-bottom: 1px solid #f0f0f0;
 }
@@ -420,13 +457,7 @@ onMounted(() => {
 }
 
 .search-bar {
-  display: flex;
-  gap: 12px;
   margin-bottom: 20px;
-}
-
-.search-bar .ant-input {
-  flex: 1;
 }
 
 .goods-grid {
@@ -436,6 +467,7 @@ onMounted(() => {
 }
 
 .goods-card {
+  position: relative;
   background: #fff;
   border-radius: 8px;
   overflow: hidden;
@@ -448,25 +480,6 @@ onMounted(() => {
   transform: translateY(-4px);
 }
 
-.goods-image {
-  position: relative;
-  height: 200px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.emoji-icon {
-  font-size: 64px;
-}
-
-.goods-img {
-  width: 100%;
-  height: 200px;
-  object-fit: cover;
-}
-
 .sold-badge {
   position: absolute;
   top: 10px;
@@ -476,6 +489,7 @@ onMounted(() => {
   padding: 4px 12px;
   border-radius: 4px;
   font-size: 12px;
+  z-index: 2;
 }
 
 .goods-info {
@@ -485,7 +499,7 @@ onMounted(() => {
 .goods-name {
   font-size: 16px;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -494,7 +508,7 @@ onMounted(() => {
 .goods-desc {
   font-size: 13px;
   color: #999;
-  margin-bottom: 12px;
+  margin: 0 0 12px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -510,8 +524,6 @@ onMounted(() => {
   font-weight: 700;
   color: #ff4d4f;
 }
-
-
 
 .goods-meta {
   display: flex;
@@ -532,34 +544,7 @@ onMounted(() => {
 }
 
 .detail-content {
-  display: flex;
-  gap: 24px;
-}
-
-.detail-image {
-  width: 200px;
-  height: 200px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.emoji-icon-large {
-  font-size: 80px;
-}
-
-.detail-img {
-  width: 200px;
-  height: 200px;
-  object-fit: cover;
-  border-radius: 8px;
-}
-
-.detail-info {
-  flex: 1;
+  padding: 8px;
 }
 
 .detail-price {
@@ -570,10 +555,10 @@ onMounted(() => {
   font-size: 32px;
 }
 
-
-
 .detail-meta {
   margin-bottom: 20px;
+  display: flex;
+  gap: 10px;
 }
 
 .detail-description,
@@ -584,13 +569,15 @@ onMounted(() => {
 .detail-description h4,
 .detail-owner h4 {
   font-size: 14px;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
+  color: #333;
 }
 
 .detail-description p {
   font-size: 14px;
   color: #666;
   line-height: 1.6;
+  margin: 0;
 }
 
 .detail-owner p {
@@ -607,9 +594,5 @@ onMounted(() => {
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid #f0f0f0;
-}
-
-.detail-actions .ant-btn {
-  width: 100%;
 }
 </style>
